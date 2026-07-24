@@ -1,0 +1,5 @@
+Elenco dei file .txt nella cartella C:\temp:
+C:\temp\mvn-out.txt
+C:\temp\mvn-test.txt
+C:\temp\mvn-test2.txt
+C:\temp\t.txt

@@ -19,7 +19,7 @@ import java.util.Scanner;
 @Slf4j
 public class AgentExecutor {
 
-    private static final String AGENT_RESOURCE = "/org/hubbers/react/qwen2.5-7b-instruct-q4_k_m/agent.yaml";
+    private static final String AGENT_RESOURCE = "/org/hubbers/react/gemma-3-1b-it-IQ4_NL/agent.yaml";
 
     // =========================================================================
     // Interactive main
