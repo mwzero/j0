@@ -1,7 +1,7 @@
 # j0
 A lightweight ReAct loop module for local LLM experiments.
 
-This module focuses on:
+Focus on:
 - Prompt-driven Reason/Act/Observe cycles
 - Tool execution via XML-like call tags
 - Local model providers (llama.cpp and Ollama)
@@ -30,43 +30,13 @@ This module focuses on:
 - Java 21+
 - Maven 3.9+
 - Optional local model runtime:
-  - llama.cpp server (`/v1/chat/completions`) on `http://localhost:8080`
+  - llama.cpp `http://localhost:8080`
   - or Ollama on `http://localhost:11434`
 
 ## Quick Start
 
-From repository root:
-
 ```bash
-mvn -pl hubbers-react test
-```
-
-Or run only this module by pom path:
-
-```bash
-mvn test -f hubbers-react/pom.xml
-```
-
-Build the module jar:
-
-```bash
-mvn -pl hubbers-react package
-```
-
-## Run Loop Tests
-
-Run all hubbers-react tests:
-
-```bash
-mvn -pl hubbers-react test
-```
-
-Run only selected tests:
-
-```bash
-mvn -pl hubbers-react -Dtest=ToolIndexTest test
-mvn -pl hubbers-react -Dtest=MinimalFileToolCallHandlerTest test
-mvn -pl hubbers-react -Dtest=HubberAgentLoopTest test
+mvn -pl j0-react -Dtest=HubberAgentLoopTest test
 ```
 
 ## Optional Interactive Demo
