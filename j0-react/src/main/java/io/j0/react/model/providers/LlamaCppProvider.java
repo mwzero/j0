@@ -6,6 +6,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Paths;
+import java.time.Duration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -55,6 +56,7 @@ public class LlamaCppProvider extends ModelProvider {
             HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/v1/chat/completions"))
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(300)) // 5 minute timeout for code generation
                     .POST(HttpRequest.BodyPublishers.ofString(payload))
                     .build();
 

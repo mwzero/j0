@@ -28,7 +28,7 @@ public final class McpServer {
     private Javalin app;
 
     public McpServer() {
-        this(new ObjectMapper(), new JavaCodeExecutor(), Path.of("generated", "j0-mcp"), Duration.ofSeconds(10));
+        this(new ObjectMapper(), new JavaCodeExecutor(), Path.of("generated", "j0-mcp"), Duration.ofSeconds(300));
     }
 
     McpServer(ObjectMapper mapper, JavaCodeExecutor executor, Path defaultOutputDirectory, Duration defaultTimeout) {
