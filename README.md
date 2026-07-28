@@ -1,112 +1,125 @@
-# j0
-A lightweight ReAct loop module for local LLM experiments.
+# J0
 
-Focus on:
-- Prompt-driven Reason/Act/Observe cycles
-- Tool execution via XML-like call tags
-- Local model providers (llama.cpp and Ollama)
-- Resource-based agent configuration for repeatable tests
+j0 è un framework Java minimale per agenti **ReAct** (Reason/Act/Observe) pensato per LLM locali (llama.cpp, Ollama). Multi-modulo Maven:
 
-## What Is Included
+- **Root** (`io.j0:j0-parent`, packaging `pom`, versione `0.1.0-SNAPSHOT`, Java 25 source/target). Moduli: j0-react, j0-tools-internal. Dipendenze gestite: Jackson 2.17.2, PicoCLI 4.7.6, SLF4J 2.0.16, Logback 1.5.8, Lombok 1.18.44, JUnit 5.11.3.
+- **j0-react**: core loop, CLI, provider modello, tool RAG. Fat JAR via `maven-shade-plugin` (entry point `io.j0.react.Main`). Profilo Maven `native` con `native-maven-plugin` per build GraalVM nativa (`--no-fallback`, init SLF4J/Logback a build-time, Netty a runtime).
+- **j0-tools-internal**: implementazione concreta dei tool filesystem (`FileToolCallHandler`), caricata **dinamicamente** a runtime via JAR esterna (non è una dipendenza compile-time del loop).
 
-- Core loop orchestrator: `HubberAgentLoop`
-- YAML config loader: `ReactAgentConfig`
-- Tool catalog indexing and RAG selection: `ToolIndex`
-- Built-in file tools handler: `MinimalFileToolCallHandler`
-- Local providers:
-  - `MinimalLlamaCppProvider`
-  - `MinimalOllamaProvider`
+Filosofia dichiarata nel README: "keep this module small and explicit (manual wiring, no Spring)", "preserve deterministic test behavior", nessun auto-discovery/framework DI.
 
-## Current Behavior (Important)
+### 2. Architettura core (`io.j0.react`)
 
-- Tool calls are currently parsed from tags in this format:
-  - `<call:tool_name attr="value">content</call>`
-  - self-closing variant: `<call:tool_name attr="value"/>`
-- The interactive demo entrypoint is inside test code (`HubberAgentLoopTest.main`) and is intended for local experimentation.
-- This module is intentionally minimal and standalone-oriented.
+**`Agent.java`** — cuore del loop ReAct. Dipendenze iniettate: `ModelProvider`, `ToolCallHandler`, `ArtifactCatalogBuilder`, `ConversationMemory`, `ApprovalHandler`, `ToolIndex` (nullable).
 
-## Requirements
+- `initSystemPrompt(toolsContent)`: legge system-prompt (soul) + memory.md, sostituisce `{{TOOLS}}`/`{{MEMORY}}`, resetta history.
+- `runLoop(userRequest)`:
+  1. **Tool RAG** (se abilitato): genera query via `discovery-prompt.md` → `ToolIndex.search(query, topK)` (token-overlap scoring, `memory_append` sempre pinnato) → ricostruisce system prompt con sottoinsieme tool (`buildSubset`). Eseguito **una sola volta** all'inizio del loop, non ad ogni iterazione.
+  2. Loop fino a `max_iterations`: chiama `modelProvider.generate()`, estrae `<thought>...</thought>` e `<call:tool attr="v">content</call>` via regex `<call:(.*?)(?:/>|</call>)`.
+  3. Se c'è una call: check `approval="required"` → `ApprovalHandler.approve()`; se ok, `ToolCallHandler.handle()` → `RunResult`; osservazione JSON incorniciata da `observation-prompt.md` e reinserita come user message. Se rifiutata, messaggio da `rejection-prompt.md`.
+  4. Se non c'è call → task considerato completo, esce dal loop.
+  5. **Protezione infinite-loop**: rilevazione azione ripetuta identica → forza uscita.
+  6. **Post-loop reflection**: `reflectAndUpdateMemory()` — prompt minimale (solo system+user, non history completa) per estrarre `<call:memory_append>` da salvare in memory.md.
 
-- Java 21+
-- Maven 3.9+
-- Optional local model runtime:
-  - llama.cpp `http://localhost:8080`
-  - or Ollama on `http://localhost:11434`
+**`AgentBuilder.java`**: factory (`fromResource`/`fromFile`) — carica `AgentConfig`, risolve path prompt, costruisce `ToolIndex` (se RAG on), istanzia `ToolCallHandler` (via `DynamicToolHandlerFactory` se `tool_library` configurato, altrimenti `DisabledToolCallHandler`), istanzia `ModelProvider`.
 
-## Quick Start
+**`AgentConfig.java`**: schema di `agent.yaml` — `AgentMeta` (name, version, model, max_iterations), `PromptsConfig` (soul/tools/memory/observation/reflection/rejection filenames), `ToolRagConfig` (enabled/topK/discovery_prompt), `ToolLibraryConfig` (handler_class + jar_path oppure coordinate Maven group/artifact/version/classifier).
 
-```bash
-mvn -pl j0-react -Dtest=HubberAgentLoopTest test
+**`ArtifactCatalogBuilder.java`**: `build()` (catalogo completo da tools.md) / `buildSubset(entries)` (sottoinsieme per RAG).
+
+**`Main.java`**: `new CommandLine(new J0Command()).execute(args)`.
+
+### 3. Sottopacchetti
+
+- **`cli/`** — `J0Command.java` (picocli): flag `--agent <path>` | `--agentresource <path>` (uno obbligatorio), `--userprompt <text>`, `--provider {ollama|llamacpp}` (default llamacpp), `--single-command`, `--auto-approve`. Senza `--single-command` → loop interattivo stdin/stdout.
+- **`execution/`** — `RunResult` (status `RUNNING|PENDING|SUCCESS|FAILED`, output JsonNode, error, factory `success()`/`failed()`/`pending()`), `ExecutionStatus`, più DTO di tracing opzionali non usati nel loop base.
+- **`memory/`** — `ConversationMemory` interface (`saveMessage`, `loadHistory`, `saveFact`, `getFact`, `searchFacts`, `clearConversation`); `InMemoryMemory` (ConcurrentHashMap); `Fact` record.
+- **`model/`** — `Message` (role/content, factory `system/user/assistant/tool`), `ModelRequest` (systemPrompt, userPrompt, model, temperature, think, messages, functions), `ModelResponse` (content, functionCalls, finishReason, token usage). `FunctionDefinition`/`FunctionCall` presenti ma non usati nel loop attuale (no native function-calling, solo tag XML).
+- **`model/providers/`**:
+  - `ModelProvider` (astratta): `generate(ModelRequest)`, tracing helper (`traceRequest/traceResponse/traceError`).
+  - `OllamaProvider`: POST `http://localhost:11434/api/generate`, payload `{model, prompt, stream:false}`, estrae campo `response`; trace in `ollama-trace.log`.
+  - `LlamaCppProvider`: POST `http://localhost:8080/v1/chat/completions` (OpenAI-compatible), payload `{messages:[...], stream:false}`, estrae `choices[0].message.content` via **parsing JSON reale (Jackson)**, non regex (bug storico corretto: regex confondeva le virgolette escaped nel testo generato dal modello con la fine del campo); trace in `llamacpp-trace.log`.
+- **`tools/`** — `ToolCallHandler` (`@FunctionalInterface handle(artifactName, JsonNode arguments) → RunResult`); `ToolEntry` (name, description, syntax, tags per scoring); `ToolIndex` (parse tools.md → mappa, `search(query, topK)` token-overlap, pinned=`memory_append`); `ApprovalHandler` (`approve(toolName, callToken) → boolean`); `MinimalApprovalHandler` (auto-approve o prompt stdin s/si/y/yes); `DisabledToolCallHandler` (fallback se `tool_library` non configurato); `DynamicToolHandlerFactory` (URLClassLoader + reflection per istanziare handler da JAR esterna); `MavenArtifactJarResolver` (risolve JAR path diretto o coordinate Maven in `~/.m2/repository`).
+
+### 4. Tool catalog (j0-tools-internal → `FileToolCallHandler`)
+
+18 tool, dispatch via switch su `artifactName`:
+
+| Tool | Parametri | Note |
+|---|---|---|
+| `file_write` | filename, content | crea parent dir se mancante |
+| `file_read` | filename | → `{content}` |
+| `file_delete` | filename **oppure** foldername+pattern | dual-mode: singolo file o glob multi-file |
+| `file_append` | filename, content | |
+| `file_move` | src, dest | |
+| `file_copy` | src, dest | |
+| `file_exists` | filename | → `{exists}` |
+| `file_info` | filename | size/created/modified/is_directory |
+| `files_list` | foldername, min_size (opz.) | → `{files[], count}` |
+| `files_search` | foldername, pattern | ricerca testo nei file |
+| `files_find` | foldername, pattern (glob) | |
+| `files_common` | foldername, pattern | file comuni a tutte le subdirectory |
+| `dir_exists` | foldername | |
+| `dir_create` | foldername | ricorsivo |
+| `dir_delete` | foldername | ricorsivo, distruttivo |
+| `file_compress` | src (file/folder/glob **), dest | crea ZIP, preserva gerarchia relativa |
+| `file_decompress` | src, dest | con protezione zip-slip |
+| `memory_append` | content | append a memory.md |
+
+Molti tool hanno `approval="required"` per le operazioni con side-effect (write/delete/move/compress-related). Sintassi generale: `<call:tool_name attr="value">content</call>` oppure self-closing `<call:tool_name attr="value"/>`.
+
+### 5. Formato `agent.yaml` (esempio reale)
+
+```yaml
+agent:
+  name: gemma-3-1b-it-IQ4_NL.gguf
+  version: 1.0.0
+  description: ReAct loop agent with file system tools
+  max_iterations: 10
+
+prompts:
+  soul:        system-prompt.md
+  tools:       tools.md
+  memory:      memory.md
+  observation: observation-prompt.md
+  reflection:  reflection-prompt.md
+  rejection:   rejection-prompt.md
+
+tool_rag:
+  enabled: true
+  top_k: 8
+  discovery_prompt: discovery-prompt.md
+
+tool_library:
+  jar_path: tools/j0-tools-internal-0.1.0-SNAPSHOT.jar
+  handler_class: io.j0.react.tools.FileToolCallHandler
 ```
 
-## Optional Interactive Demo
+### 6. File di prompt e placeholder
 
-The interactive console demo is exposed via:
-- `org.hubbers.react.HubberAgentLoopTest.main`
+| File | Ruolo | Placeholder |
+|---|---|---|
+| `system-prompt.md` | identità + istruzioni comportamento | `{{TOOLS}}`, `{{MEMORY}}` |
+| `tools.md` | tabella markdown statica di reference | — |
+| `memory.md` | fatti persistenti, mutato da `memory_append` | — |
+| `discovery-prompt.md` | genera keyword query per Tool RAG | `{{REQUEST}}` |
+| `observation-prompt.md` | incornicia il risultato tool come user message | `{{TOOL_NAME}}`, `{{OBSERVATION}}` |
+| `reflection-prompt.md` | istruisce il salvataggio fatti post-loop | `{{TODAY}}`, `{{ACTIONS}}` |
+| `rejection-prompt.md` | messaggio quando l'utente nega l'approval | `{{TOOL_NAME}}` |
 
-Typical workflow:
-1. Start your local model server (llama.cpp or Ollama).
-2. Run `HubberAgentLoopTest.main` from your IDE.
-3. Chat with the agent and type `exit` to stop.
+### 7. Esecuzione CLI
 
-## Agent Configuration
+```bash
+java -jar j0.jar --agent /path/to/agent --userprompt "..." --provider llamacpp --single-command
+java -jar j0.jar --agentresource /agents/x/agent.yaml --provider ollama --auto-approve
+java -jar j0.jar --agent ./my-agent   # loop interattivo, "exit" per uscire
+```
 
-Test profiles are under:
-- `src/test/resources/org/hubbers/react/qwen2.5-3b-instruct-q8_0/`
-- `src/test/resources/org/hubbers/react/qwen2.5-7b-instruct-q4_k_m/`
+### 8. Vincoli/comportamenti noti importanti
 
-Each profile contains:
-- `agent.yaml`
-- `system-prompt.md`
-- `tools.md`
-- `memory.md`
-- `observation-prompt.md`
-- `reflection-prompt.md`
-- `rejection-prompt.md`
-- optional `discovery-prompt.md` (for tool RAG flow)
+- **Nessuna infrastruttura di code-execution**: nessun `javax.script`, GraalVM Truffle/polyglot, `ProcessBuilder`/`exec`, sandbox. GraalVM è usato **solo** per compilazione native-image (`--no-fallback`), non per esecuzione runtime di codice arbitrario.
+- **RAG one-shot**: la query di discovery viene generata una sola volta a inizio `runLoop()`, non rigenerata ad ogni iterazione — rischio di perdere verbi/azioni in richieste multi-step.
+- **`--auto-approve`** approva automaticamente **qualunque** tool con `approval="required"`, incluse operazioni distruttive come `dir_delete` su intere cartelle — nessuna distinzione di rischio granulare.
+- **Modelli target**: pensato per piccoli modelli locali quantizzati (es. gemma-3-1b-it-IQ4_NL, qwen2.5-3b/7b); esperienza pratica mostra che questi modelli sono molto sensibili alla lunghezza/complessità del system prompt (prompt più corti e con pochi esempi mirati performano meglio di prompt lunghi ed esaustivi).
+- Tool call extraction basata su regex per il tag XML (`<call:...>`), ma **parsing del body JSON HTTP delle risposte del modello fatto con Jackson**, non regex (per evitare falsi positivi su virgolette escaped).
 
-Example config sections in `agent.yaml`:
-- `agent`
-- `model`
-- `config.max_iterations`
-- `prompts`
-- optional `tool_rag` (`enabled`, `top_k`, `discovery_prompt`)
-
-## Tool Catalog and RAG
-
-- `tools.md` defines the exact syntax the model should copy.
-- `ToolIndex` parses the markdown table and ranks tools by token overlap.
-- `memory_append` is pinned and always included in tool subsets.
-
-## Trace Logs
-
-Providers write request/response traces in the working directory:
-- llama.cpp provider: `llamacpp-trace.log`
-- Ollama provider: `ollama-trace.log`
-
-If debugging model output, check these files first.
-
-## Troubleshooting
-
-### Tests pass but interactive run fails
-
-- Verify local model server is running.
-- Confirm endpoint and port:
-  - llama.cpp: `http://localhost:8080/v1/chat/completions`
-  - Ollama: `http://localhost:11434/api/generate`
-
-### Tool call does not execute
-
-- Ensure the model output uses exact tag syntax from `tools.md`.
-- Check that tool names match exactly (for example `dir_exists`, `file_write`).
-
-### Prompt/resource not found
-
-- Verify profile path under `src/test/resources/org/hubbers/react/...`.
-- Ensure `agent.yaml` references existing files in the same profile folder.
-
-## Notes for Contributors
-
-- Keep this module small and explicit (manual wiring, no Spring).
-- Preserve deterministic test behavior (stub model providers where possible).
-- Prefer adding focused unit tests when changing parsing, tool dispatch, or config loading.

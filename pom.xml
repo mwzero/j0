@@ -12,6 +12,7 @@
 
     <modules>
         <module>j0-react</module>
+        <module>j0-tools-internal</module>
     </modules>
 
     <properties>
@@ -20,6 +21,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         
         <!-- Dependency versions -->
+        <j0.version>0.1.0-SNAPSHOT</j0.version>
         <jackson.version>2.17.2</jackson.version>
         <picocli.version>4.7.6</picocli.version>
         <javalin.version>5.6.3</javalin.version>
@@ -49,6 +51,19 @@
     <dependencyManagement>
 
         <dependencies>
+
+            <dependency>
+                <groupId>io.j0</groupId>
+                <artifactId>j0-react</artifactId>
+                <version>${j0.version}</version>
+            </dependency>   
+
+            <dependency>
+                <groupId>io.j0</groupId>
+                <artifactId>j0-tools</artifactId>
+                <version>${j0.version}</version>
+            </dependency>
+
             <!-- CLI -->
             <dependency>
                 <groupId>info.picocli</groupId>

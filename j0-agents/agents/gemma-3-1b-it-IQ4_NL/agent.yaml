@@ -1,0 +1,23 @@
+agent:
+  name: hubber.react
+  version: 1.0.0
+  description: ReAct loop agent with file system tools
+  name: gemma-3-1b-it-IQ4_NL.gguf
+  max_iterations: 10
+
+prompts:
+  soul:        system-prompt.md
+  tools:       tools.md
+  memory:      memory.md
+  observation: observation-prompt.md
+  reflection:  reflection-prompt.md
+  rejection:   rejection-prompt.md
+
+tool_rag:
+  enabled: true
+  top_k: 8
+  discovery_prompt: discovery-prompt.md
+
+tool_library:
+  jar_path: tools/j0-tools-internal-0.1.0-SNAPSHOT.jar
+  handler_class: io.j0.react.tools.FileToolCallHandler
