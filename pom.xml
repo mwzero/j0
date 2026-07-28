@@ -13,6 +13,8 @@
     <modules>
         <module>j0-react</module>
         <module>j0-tools-internal</module>
+        <module>j0-code</module>
+        <module>j0-mcp</module>
     </modules>
 
     <properties>
@@ -61,6 +63,12 @@
             <dependency>
                 <groupId>io.j0</groupId>
                 <artifactId>j0-tools</artifactId>
+                <version>${j0.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>io.j0</groupId>
+                <artifactId>j0-code</artifactId>
                 <version>${j0.version}</version>
             </dependency>
 

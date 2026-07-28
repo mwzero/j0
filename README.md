@@ -5,6 +5,8 @@ j0 è un framework Java minimale per agenti **ReAct** (Reason/Act/Observe) pensa
 - **Root** (`io.j0:j0-parent`, packaging `pom`, versione `0.1.0-SNAPSHOT`, Java 25 source/target). Moduli: j0-react, j0-tools-internal. Dipendenze gestite: Jackson 2.17.2, PicoCLI 4.7.6, SLF4J 2.0.16, Logback 1.5.8, Lombok 1.18.44, JUnit 5.11.3.
 - **j0-react**: core loop, CLI, provider modello, tool RAG. Fat JAR via `maven-shade-plugin` (entry point `io.j0.react.Main`). Profilo Maven `native` con `native-maven-plugin` per build GraalVM nativa (`--no-fallback`, init SLF4J/Logback a build-time, Netty a runtime).
 - **j0-tools-internal**: implementazione concreta dei tool filesystem (`FileToolCallHandler`), caricata **dinamicamente** a runtime via JAR esterna (non è una dipendenza compile-time del loop).
+- **j0-code**: modulo separato per generare **solo** sorgente Java tramite provider LLM, salvarlo su disco, compilarlo con il JDK corrente ed eseguirlo. Nessun loop ReAct, nessun catalogo tool.
+- **j0-mcp**: server MCP stdio minimale con un primo tool che riceve sorgente Java, lo compila con `JavaCodeExecutor` e ne esegue il `main`.
 
 Filosofia dichiarata nel README: "keep this module small and explicit (manual wiring, no Spring)", "preserve deterministic test behavior", nessun auto-discovery/framework DI.
 
@@ -113,6 +115,9 @@ tool_library:
 java -jar j0.jar --agent /path/to/agent --userprompt "..." --provider llamacpp --single-command
 java -jar j0.jar --agentresource /agents/x/agent.yaml --provider ollama --auto-approve
 java -jar j0.jar --agent ./my-agent   # loop interattivo, "exit" per uscire
+
+mvn -pl j0-code package
+java -jar j0-code/target/j0-code.jar --userprompt "scrivi un programma che stampa hello" --provider llamacpp
 ```
 
 ### 8. Vincoli/comportamenti noti importanti
